@@ -1,0 +1,3 @@
+Create an issue for the current plan in Github. Decide whether it should be tagged as an Enhancement or a Bug.
+
+The issue should describe the problem and the acceptance criteria but should not include full implementation details. It should have a link to refer to the current plan and to refer to the branch we are on. Make sure the plan is updated so that it knows the number of the Github issue so that when a PR is created the associated issue can be closed.

@@ -1,0 +1,1 @@
+Prepare to reset context by updating progress.md with our current state. I will reset context and resume after you have done this.
