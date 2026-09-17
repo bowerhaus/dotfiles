@@ -3,6 +3,8 @@ I'm happy that the current changes on this branch fulfil the plan.
 ## 1. Mark the Plan Complete
 Mark the plan as complete and update progress.md in accordance with the rules in CLAUDE.md.
 
+Name the branch and PR, and add this standing caveat so the page explains its own staleness once the PR is merged: *if the branch named here is already merged or gone, the PR has been merged — `main` carries this plan and the next action is the one that follows it.*
+
 ## 2. Documentation Review
 Read the plan's Requirements and any Verification sections to understand what changed. Then:
 
