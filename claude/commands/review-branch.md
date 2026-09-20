@@ -14,7 +14,17 @@ Review the current branch's changes by launching two fresh review agents in para
 3. Get the list of modified file paths (from the commands above). Keep this list — you'll pass it to the agents. Do NOT read the files themselves.
 4. Find the plan file path: use Glob with pattern `plans/*<branch-name>*.md`. Note the path (or `none`). Do NOT read it.
 5. Find the linked GitHub issue number. **This is wanted whether or not a plan file exists** — the plan is where the findings are recorded, the issue is where they are seen.
-   - If a plan file was found, take the number from the plan's own `Closes` line *without reading the file*: `grep -m1 -oE 'Closes \[?#[0-9]+' <plan path>`. That is a name, not content — it does not count as reading the plan.
+   - If a plan file was found, take the number from the plan's own **`Issue:` header** *without reading the file*:
+     `grep -m1 -oE '^\*{0,2}(GitHub )?Issue:?\*{0,2} *\[?#[0-9]+' <plan path> | grep -oE '[0-9]+$'`.
+     That is a name, not content — it does not count as reading the plan.
+   - **Anchor on `Issue:`, never on `Closes`.** They are different fields. A plan's `Issue:` line is its
+     reference to the issue; a `Closes #NN` in a plan is prose reminding you what the *PR body* must say,
+     and GitHub only acts on it there. Grepping for `Closes` catches it inside longer sentences — one plan's
+     only occurrence is a conditional, "in which case `Closes #40`" — so it returns a number that happens to
+     be right rather than one that is structurally the plan's. Measured over 38 plans in one repository, the
+     `Closes` grep found the issue for 4 of the last 9 plans; the anchored `Issue:` grep found 9 of 9.
+     The regex deliberately requires the `#` to follow the label directly, so a loose line such as
+     `Issue: see audit §7 — #100` returns nothing rather than a guess.
    - Otherwise, if the branch name starts with a number (e.g. `123-fix-thing`), that's the issue number
    - Otherwise run `gh issue list --search "<branch-name>" --state open --limit 3` and note the most relevant issue number (or `none`). Do NOT call `gh issue view`.
 6. Derive the list of CLAUDE.md paths to check: always include `CLAUDE.md` at the repo root. For each directory containing a modified file, include `<dir>/CLAUDE.md` if it exists (check with Glob, do NOT read). Pass the final list of paths to the agents.
