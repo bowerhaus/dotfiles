@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(grep:*), Bash(date:*), Bash(cat:*)
+allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(grep:*), Bash(date:*), Bash(cat:*)
 description: Review code changes on the current branch
 ---
 
@@ -10,8 +10,21 @@ Review the current branch's changes by launching two fresh review agents in para
 ## Step 1 — Minimal discovery (paths and names only)
 
 1. Get the current branch name: `git rev-parse --abbrev-ref HEAD`
-2. Check if there is any diff at all. If `git diff main...HEAD --name-only` AND `git diff --name-only` AND `git diff --cached --name-only` are all empty, report "Nothing to review — branch is identical to main." and stop.
-3. Get the list of modified file paths (from the commands above). Keep this list — you'll pass it to the agents. Do NOT read the files themselves.
+2. Check if there is anything to review at all. A branch's changes are **four** lists, not three:
+   `git diff main...HEAD --name-only` (committed), `git diff --name-only` (unstaged),
+   `git diff --cached --name-only` (staged), and `git ls-files --others --exclude-standard`
+   (**untracked**). If all four are empty, report "Nothing to review — branch is identical to main."
+   and stop.
+
+   **Untracked files are the easiest way to review a fifth of a branch without noticing.** No form
+   of `git diff` reports them, so a branch whose new services, controllers and test files have not
+   been staged yet is invisible to all three diff commands. Nothing signals the absence: both agents
+   return confident findings on the remainder, and a test-review agent that cannot see four new test
+   files will report the new code as untested — the exact opposite of the truth. New files are also
+   where the *new* code is, so they are the part least safe to skip.
+3. Get the list of changed file paths from all four commands above, untracked included. Keep this
+   list — you'll pass it to the agents, marking which paths are untracked. Do NOT read the files
+   themselves.
 4. Find the plan file path: use Glob with pattern `plans/*<branch-name>*.md`. Note the path (or `none`). Do NOT read it.
 5. Find the linked GitHub issue number. **This is wanted whether or not a plan file exists** — the plan is where the findings are recorded, the issue is where they are seen.
    - If a plan file was found, take the number from the plan's own **`Issue:` header** *without reading the file*:
@@ -52,10 +65,13 @@ CLAUDE.md files to read: <LIST OF PATHS>
 STEPS:
 1. Read the spec anchor (plan or issue) if one exists
 2. Read all listed CLAUDE.md files
-3. Gather the full diff:
+3. Gather the full diff. Four parts — the fourth is not a diff, and is the one that gets missed:
    - git diff main...HEAD (committed changes)
    - git diff (unstaged changes)
    - git diff --cached (staged changes)
+   - git ls-files --others --exclude-standard (UNTRACKED files). No git diff form shows these.
+     Read each one in full and review it as a wholly new file, because that is what it is. A
+     branch's new services, controllers and modules commonly sit here unstaged.
 4. Review the diff for:
    a. REQUIREMENTS — does the implementation fulfil the stated goals/acceptance criteria from the plan or issue? (Skip if no spec anchor)
    b. BUGS — obvious bugs introduced by this branch. Not nitpicks, not pre-existing issues, not things a linter/typechecker would catch.
@@ -91,8 +107,11 @@ Modified source files: <LIST>
 STEPS:
 1. Gather the test diff: git diff main...HEAD -- tests/
 2. Also check for unstaged/staged test changes: git diff -- tests/ and git diff --cached -- tests/
-3. Read the modified test files in full to understand the complete test context
-4. Read the corresponding source files that are being tested to understand what the tests should cover
+3. AND untracked test files: git ls-files --others --exclude-standard -- tests/ — no git diff form
+   shows these, and a whole new suite often lives here. Read each in full. Missing them would have
+   you report thoroughly tested code as untested, which is worse than saying nothing.
+4. Read the modified test files in full to understand the complete test context
+5. Read the corresponding source files that are being tested to understand what the tests should cover
 
 Review for:
 a. COVERAGE GAPS — are new or changed code paths covered by tests? Flag important paths that lack tests.
