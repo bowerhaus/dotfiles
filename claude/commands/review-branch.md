@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*)
+allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(grep:*), Bash(date:*), Bash(cat:*)
 description: Review code changes on the current branch
 ---
 
@@ -13,10 +13,12 @@ Review the current branch's changes by launching two fresh review agents in para
 2. Check if there is any diff at all. If `git diff main...HEAD --name-only` AND `git diff --name-only` AND `git diff --cached --name-only` are all empty, report "Nothing to review — branch is identical to main." and stop.
 3. Get the list of modified file paths (from the commands above). Keep this list — you'll pass it to the agents. Do NOT read the files themselves.
 4. Find the plan file path: use Glob with pattern `plans/*<branch-name>*.md`. Note the path (or `none`). Do NOT read it.
-5. If no plan file, look for a linked GitHub issue number:
-   - If the branch name starts with a number (e.g. `123-fix-thing`), that's the issue number
+5. Find the linked GitHub issue number. **This is wanted whether or not a plan file exists** — the plan is where the findings are recorded, the issue is where they are seen.
+   - If a plan file was found, take the number from the plan's own `Closes` line *without reading the file*: `grep -m1 -oE 'Closes \[?#[0-9]+' <plan path>`. That is a name, not content — it does not count as reading the plan.
+   - Otherwise, if the branch name starts with a number (e.g. `123-fix-thing`), that's the issue number
    - Otherwise run `gh issue list --search "<branch-name>" --state open --limit 3` and note the most relevant issue number (or `none`). Do NOT call `gh issue view`.
 6. Derive the list of CLAUDE.md paths to check: always include `CLAUDE.md` at the repo root. For each directory containing a modified file, include `<dir>/CLAUDE.md` if it exists (check with Glob, do NOT read). Pass the final list of paths to the agents.
+7. Get today's date, for dating the record in Step 3: `date +%Y-%m-%d`.
 
 ## Step 2 — Launch two review agents in parallel
 
@@ -104,7 +106,53 @@ Return a numbered list of findings ordered by severity (most severe first). For 
 If no issues found, return: "No issues found."
 ```
 
-## Step 3 — Report results
+## Step 3 — Record the findings in the plan file (APPEND ONLY)
+
+**Skip this step if there is no plan file.** Where there is one, it is the durable home for a
+review: the convention is a dated `## Review pass` section at the foot, and recent plans in
+these repositories all carry one. A review that exists only in the terminal is a review that
+gets lost at the next context reset.
+
+**Append only. Never rewrite, re-order or delete existing text, and never open the plan for
+editing** — a plan can run well past a thousand lines and this session has deliberately not
+read it. Use one shell append with a **quoted** heredoc (`<<'REVIEW'`), so nothing in the
+agents' output is interpolated by the shell:
+
+```bash
+cat >> <PLAN PATH> <<'REVIEW'
+
+## Review pass — <YYYY-MM-DD>
+
+Findings from `/review-branch` on branch `<BRANCH>`, **unresolved as written**. Each is a claim
+from a review on that date, not an established fact. Work through them and annotate each with
+what was done — fixed, or rejected and why. A finding that turns out to be wrong should say so
+here rather than be deleted.
+
+### Code
+
+<AGENT 1 FINDINGS, VERBATIM>
+
+### Tests
+
+<AGENT 2 FINDINGS, VERBATIM>
+REVIEW
+```
+
+Rules for what goes in:
+
+- **Verbatim.** Do not summarise, re-order or soften what the agents returned, and do not
+  merge the two lists.
+- **No dispositions.** Nothing has been done about these findings yet, so the section must not
+  claim anything was fixed. Dispositions are added later, by you or on your explicit
+  instruction, as each is handled — never by the review run itself. Note that the "annotate
+  each with what was done" line above is part of the text being written *into the plan*,
+  addressed to whoever reads it later. It is not a to-do list for this run.
+- **Date every pass.** A second run appends a second `## Review pass — <date>` section rather
+  than touching the first. Two dated passes are an honest record; an overwritten one is not.
+- **Record a clean review too.** If both agents returned "No issues found", still append the
+  section saying so. That a review ran on a date and found nothing is worth knowing.
+
+## Step 4 — Report results, then point the issue at the record
 
 Combine both agents' findings and present them to the user in this format. The summary should come from what the agents report (they read the diff; you did not). Do not attempt to write your own summary of the changes.
 
@@ -122,4 +170,11 @@ Reviewed against: <plan file path, issue number, or "no linked spec">
 <Agent 2 findings — numbered list as returned>
 ```
 
-If a GitHub issue was found in Step 1, automatically post the review as a comment on that issue using `gh issue comment <NUMBER> --body "..."`. Confirm to the user that the comment was posted, with a link to the issue.
+Then tell the user where the durable record went: the plan file path and the
+`## Review pass — <date>` heading appended to it, or that there was no plan file to write to.
+
+If a GitHub issue was found in Step 1, post the review as a comment on that issue using
+`gh issue comment <NUMBER> --body "..."`. **When a plan file exists, the comment carries the
+findings *and* names the plan file and its new `## Review pass — <date>` section** — the
+durable home is written first and the issue points at it, not the other way round. Confirm to
+the user that the comment was posted, with a link to the issue.
