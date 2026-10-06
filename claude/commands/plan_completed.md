@@ -11,7 +11,7 @@ Three rules, in order of importance:
 - **Write the next action so it does not depend on whether the PR has merged.** After this skill that is almost always *the next plan*: merging is the user's action, not the session's, and it does not change what the next session should do. If the next action is the same either way, the ambiguity stops mattering. Only "branch off `main`, or not?" differs, and `git status -sb` settles that in one command.
 - **Put the disambiguating check on the line beside the status, not in a block further down.** `gh pr view <n> --json state` — `OPEN` means it has not merged, `MERGED` means `main` carries it. A qualifier a hundred lines below the claim it qualifies does not get read; the status block does, because the page says to read it first.
 
-**Do not make the signal "the branch is merged or gone."** Where branches are never deleted — which is the common case — that condition never fires, and it asks the reader to discover the very fact they are trying to establish.
+**Do not make the signal "the branch is merged or gone."** Deleting a branch is a separate step from merging its PR — it may happen later, or not at all — so whether the branch exists says nothing reliable, and the condition asks the reader to discover the very fact they are trying to establish.
 
 ## 2. Documentation Review
 Read the plan's Requirements and any Verification sections to understand what changed. Then:
