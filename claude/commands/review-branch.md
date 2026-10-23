@@ -1,11 +1,13 @@
 ---
-allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(grep:*), Bash(date:*), Bash(cat:*)
+allowed-tools: Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git ls-files:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue comment:*), Bash(gh issue create:*), Bash(grep:*), Bash(date:*), Bash(cat:*)
 description: Review code changes on the current branch
 ---
 
 Review the current branch's changes by launching two fresh review agents in parallel. Follow these steps precisely.
 
-**CRITICAL: The main session must do MINIMAL work.** Your job is to discover paths and names, then delegate. Do NOT read the diff, the plan file, the issue body, any source files, any test files, or any CLAUDE.md files. All reading must be done by the fresh review agents so they have uncontaminated context. If you find yourself about to use the Read tool, stop — delegate to the agents instead.
+**CRITICAL: Until both agents have returned, the main session must do MINIMAL work.** Your job in Steps 1 and 2 is to discover paths and names, then delegate. Do NOT read the diff, the plan file, the issue body, any source files, any test files, or any CLAUDE.md files. All reading must be done by the fresh review agents so they have uncontaminated context. If you find yourself about to use the Read tool before they return, stop — delegate to the agents instead.
+
+**Once they have returned, the main session reviews the review (Step 3).** The rule above exists to keep the *reviewers'* context clean, and by then it has done its job. Their findings are claims, and some do not survive a look at the code; checking them, and recommending which to fix, is this session's work, not theirs. An agent asked to judge its own findings defends them.
 
 ## Step 1 — Minimal discovery (paths and names only)
 
@@ -41,7 +43,7 @@ Review the current branch's changes by launching two fresh review agents in para
    - Otherwise, if the branch name starts with a number (e.g. `123-fix-thing`), that's the issue number
    - Otherwise run `gh issue list --search "<branch-name>" --state open --limit 3` and note the most relevant issue number (or `none`). Do NOT call `gh issue view`.
 6. Derive the list of CLAUDE.md paths to check: always include `CLAUDE.md` at the repo root. For each directory containing a modified file, include `<dir>/CLAUDE.md` if it exists (check with Glob, do NOT read). Pass the final list of paths to the agents.
-7. Get today's date, for dating the record in Step 3: `date +%Y-%m-%d`.
+7. Get today's date, for dating the record in Step 4: `date +%Y-%m-%d`.
 
 ## Step 2 — Launch two review agents in parallel
 
@@ -87,7 +89,8 @@ DO NOT FLAG:
 - Issues on lines not modified in this branch
 
 OUTPUT FORMAT:
-Return a numbered list of findings ordered by severity (most severe first). For each finding:
+Return a list of findings ordered by severity (most severe first), numbered C1, C2, C3 …
+For each finding:
 - Severity label: CRITICAL, WARNING, or SUGGESTION
 - Brief description
 - File path and line number(s)
@@ -127,7 +130,8 @@ DO NOT FLAG:
 - Missing tests for trivial code (simple getters, pass-through wrappers)
 
 OUTPUT FORMAT:
-Return a numbered list of findings ordered by severity (most severe first). For each finding:
+Return a list of findings ordered by severity (most severe first), numbered T1, T2, T3 …
+For each finding:
 - Severity label: CRITICAL, WARNING, or SUGGESTION
 - Brief description
 - File path and line number(s)
@@ -135,7 +139,34 @@ Return a numbered list of findings ordered by severity (most severe first). For 
 If no issues found, return: "No issues found."
 ```
 
-## Step 3 — Record the findings in the plan file (APPEND ONLY)
+## Step 3 — Check every finding against the code, and recommend
+
+Now read. For **every** finding, C and T alike:
+
+1. Open the cited file and lines, and enough around them to judge the claim yourself: the
+   callers, the test said to be missing, the plan requirement or CLAUDE.md rule it cites. Use
+   `git diff main...HEAD -- <path>` to confirm this branch introduced it.
+2. Give it exactly one verdict:
+   - **FIX**: real, introduced by this branch, and worth changing before it merges. If only part
+     of it is worth doing, mark it **FIX (part)** and say exactly which part.
+   - **FOLLOW-UP**: real and worth doing, but not on this branch (it reaches into code the branch
+     did not change, or belongs to a later plan). Give it a draft issue title. This is the
+     verdict for anything you would otherwise tuck into a SKIP reason as "worth an issue".
+   - **SKIP**: real, but not worth changing now (it costs more than the risk it removes, it is
+     outside this branch's scope, it is cosmetic). Say which.
+   - **NOT REAL**: wrong on inspection (the code already handles it, the test exists, it
+     predates the branch, the rule does not say that). Say what you found, with `path:line`.
+3. Give one line of reason. Never "consider", never "either": the user will act on the FIX list
+   as written, without re-reading the code, so make it the list you would actually fix.
+
+Severity is the agent's label and is not the verdict: a cheap SUGGESTION can be FIX, and a
+WARNING can be SKIP. Be willing to overturn an agent; that is the point of this step. If checking
+turns up a real problem neither agent raised, add it as `M1`, `M2` … so its source is plain.
+
+**Do not fix anything, or open any issue, in this step**, however small. The user chooses from
+the list in Step 5.
+
+## Step 4 — Record the findings in the plan file (APPEND ONLY)
 
 **Skip this step if there is no plan file.** Where there is one, it is the durable home for a
 review: the convention is a dated `## Review pass` section at the foot, and recent plans in
@@ -143,9 +174,8 @@ these repositories all carry one. A review that exists only in the terminal is a
 gets lost at the next context reset.
 
 **Append only. Never rewrite, re-order or delete existing text, and never open the plan for
-editing** — a plan can run well past a thousand lines and this session has deliberately not
-read it. Use one shell append with a **quoted** heredoc (`<<'REVIEW'`), so nothing in the
-agents' output is interpolated by the shell:
+editing**: a plan can run well past a thousand lines. Use one shell append with a **quoted**
+heredoc (`<<'REVIEW'`), so nothing in the agents' output is interpolated by the shell:
 
 ```bash
 cat >> <PLAN PATH> <<'REVIEW'
@@ -153,9 +183,10 @@ cat >> <PLAN PATH> <<'REVIEW'
 ## Review pass — <YYYY-MM-DD>
 
 Findings from `/review-branch` on branch `<BRANCH>`, **unresolved as written**. Each is a claim
-from a review on that date, not an established fact. Work through them and annotate each with
-what was done — fixed, or rejected and why. A finding that turns out to be wrong should say so
-here rather than be deleted.
+from a review on that date, not an established fact, and each verdict under *Assessment* is a
+recommendation, not a decision. Work through them and annotate each with what was done — fixed,
+or rejected and why. A finding that turns out to be wrong should say so here rather than be
+deleted.
 
 ### Code
 
@@ -164,46 +195,105 @@ here rather than be deleted.
 ### Tests
 
 <AGENT 2 FINDINGS, VERBATIM>
+
+### Assessment
+
+<STEP 3 VERDICTS: one bullet per finding, by ID — FIX, FIX (part), FOLLOW-UP, SKIP or NOT REAL, and the reason; then any M findings>
 REVIEW
 ```
 
 Rules for what goes in:
 
-- **Verbatim.** Do not summarise, re-order or soften what the agents returned, and do not
-  merge the two lists.
+- **Verbatim, layout included.** Paste exactly what the agents returned: their numbering,
+  bullets and line breaks. Do not reflow a bullet list into a paragraph, summarise, re-order or
+  soften it, and do not merge the two lists. If the text needs escaping for the heredoc, that is
+  the only change allowed. Where you disagree with them, say so under *Assessment*, never by
+  editing their text.
 - **No dispositions.** Nothing has been done about these findings yet, so the section must not
-  claim anything was fixed. Dispositions are added later, by you or on your explicit
-  instruction, as each is handled — never by the review run itself. Note that the "annotate
-  each with what was done" line above is part of the text being written *into the plan*,
-  addressed to whoever reads it later. It is not a to-do list for this run.
+  claim anything was fixed. A verdict is a recommendation, not a disposition. Dispositions are
+  added later, by you or on your explicit instruction, as each is handled — never by the review
+  run itself. Note that the "annotate each with what was done" line above is part of the text
+  being written *into the plan*, addressed to whoever reads it later. It is not a to-do list for
+  this run.
 - **Date every pass.** A second run appends a second `## Review pass — <date>` section rather
   than touching the first. Two dated passes are an honest record; an overwritten one is not.
 - **Record a clean review too.** If both agents returned "No issues found", still append the
   section saying so. That a review ran on a date and found nothing is worth knowing.
 
-## Step 4 — Report results, then point the issue at the record
+## Step 5 — Post to the issue, then report, ending with the question
 
-Combine both agents' findings and present them to the user in this format. The summary should come from what the agents report (they read the diff; you did not). Do not attempt to write your own summary of the changes.
+**First, the issue.** If a GitHub issue was found in Step 1, post the review as a comment on it
+using `gh issue comment <NUMBER> --body "..."`, the decision block below included. **When a plan
+file exists, the comment carries the findings *and* names the plan file and its new
+`## Review pass — <date>` section**: the durable home is written first and the issue points at
+it, not the other way round. Do this before reporting, so the report can end on the question.
+
+**Then the report**, in this format. Give the agents' findings exactly as they returned them (do
+not write your own summary of the changes). Every finding appears in exactly one section of the
+decision block, one bullet each: never a run-on line of several items.
 
 ```
 ### Branch review: <branch-name>
 
 Reviewed against: <plan file path, issue number, or "no linked spec">
+Recorded in: <plan path> under `## Review pass — <date>` (or "no plan file"); issue comment <link> (or "no issue")
 
 #### Code
 
-<Agent 1 findings — numbered list as returned>
+<Agent 1 findings — as returned>
 
 #### Tests
 
-<Agent 2 findings — numbered list as returned>
+<Agent 2 findings — as returned>
+
+---
+
+#### Recommended fixes
+- C1 — <what is wrong> (`path:line`): <the fix>
+- C5 (part) — <which part, and what is kept>
+
+#### Follow-up issues
+- C4 — "<draft issue title>"
+
+#### Skip
+- C3 — <why not worth it>
+
+#### Not real
+- T1 — <what the code actually does, `path:line`>
+
+Fix C1 and C5 (part), and open the C4 follow-up issue? Reply **yes**, or name the IDs you want.
 ```
 
-Then tell the user where the durable record went: the plan file path and the
-`## Review pass — <date>` heading appended to it, or that there was no plan file to write to.
+**The decision block always comes last, always in that shape**, so the user can read only it
+and answer. FIX entries are ordered most severe first. Write `- none` under an empty section
+rather than dropping the heading; if both agents found nothing, the whole block is
+`Nothing to fix.`
 
-If a GitHub issue was found in Step 1, post the review as a comment on that issue using
-`gh issue comment <NUMBER> --body "..."`. **When a plan file exists, the comment carries the
-findings *and* names the plan file and its new `## Review pass — <date>` section** — the
-durable home is written first and the issue points at it, not the other way round. Confirm to
-the user that the comment was posted, with a link to the issue.
+**The report's very last line is the closing question**, naming every FIX by ID and every
+follow-up issue. Leave out the issue clause when there are no follow-ups, and the fix clause when
+there are no fixes; when there is neither, there is no question. Nothing comes after it: no
+summary, no offer, no sign-off.
+
+## Step 6 — When the user answers
+
+- **"yes"** means every FIX (each FIX (part) as scoped) and every follow-up issue. **Named IDs**
+  mean those only. A reply about fixes alone opens no issues: an issue is visible outside this
+  machine, so it is opened only when the user has said so.
+- Make the fixes, then run the project's tests and lint (from its `CLAUDE.md` *Commands*) and say
+  if anything fails.
+- Open each confirmed follow-up with `gh issue create`, its body naming the finding, the files,
+  and the branch's review pass.
+- **Close the record.** If there is a plan file, append the outcomes below that review pass, one
+  bullet per finding by ID: what was fixed, the issue number for each follow-up, and *not done*
+  with the reason for the rest. Append only, with the same quoted heredoc as Step 4:
+
+  ```bash
+  cat >> <PLAN PATH> <<'REVIEW'
+
+  ### Outcome — <YYYY-MM-DD>
+
+  - C1 — fixed: <one line>
+  - C4 — follow-up #<NN>
+  - C3 — not done: <reason, from the Skip list or the user's reply>
+  REVIEW
+  ```
